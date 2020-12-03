@@ -17,7 +17,7 @@
 #define MAX_EVENT_NUMBER 10000
 #define PORT 12306
 #define IP "192.168.127.158"
-#define TIMESLOT 20
+#define TIMESLOT 30
 
 static sort_timer_lst timer_lst;//定时器
 static int pipefd[2];//用来传递信号的管道
@@ -134,7 +134,6 @@ int main() {
                 timer -> cb_func = cb_func; //设置回调函数
                 /*初始化客户端连接*/
                 users[connfd].init(connfd,caddr,timer);
-
                 //加到定时器链表中
                 timer_lst.add_timer(timer);
             }else if(events[i].events & (EPOLLRDHUP|EPOLLHUP|EPOLLERR)) {
@@ -148,7 +147,7 @@ int main() {
                     //读到了数据 调整定时器 其实就是重新定时
                     time_t cur = time(NULL);
                     util_timer *timer = users[sockfd].timer;
-                    timer -> expire = cur + 3*TIMESLOT;
+                    timer -> expire += cur + 3*TIMESLOT;
                     printf("adjust timer once\n");
                     timer_lst.adjust_timer(timer);
 
@@ -185,6 +184,7 @@ int main() {
                     for(int i = 0;i < ret; i++) {
                         switch(signals[i]) {
                             case SIGALRM:{
+                                printf("接收到了定时器信号\n");
                                 timeout = true;
                                 break;
                             }

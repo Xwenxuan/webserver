@@ -60,7 +60,7 @@ void http_conn::init(int sockfd,const sockaddr_in &addr,util_timer * timer) {
     addfd(m_epollfd,sockfd,true);
     m_user_count++;
     //定时器
-    timer = timer;
+    this -> timer = timer;
     init();
 }
 
@@ -82,7 +82,7 @@ void http_conn::init() {
 
 }
 
-/*从状态机*/
+/*从状态机   解析行*/
 http_conn::LINE_STATUS http_conn::parse_line() {
     char tmp;
     for(;m_checked_idx < m_read_idx;m_checked_idx++) {
@@ -125,7 +125,7 @@ bool http_conn::read() {
         else if(bytes_read == 0) return false;
         m_read_idx += bytes_read;
     }
-
+    printf("read buf:%s\n",m_read_buf);
     return true;
 }
 /*
@@ -145,6 +145,8 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char * text) {
     char * method = text;
     if(strcasecmp(method,"GET") == 0) {
         m_method = GET;
+    }else if(strcasecmp(method,"POST") == 0){//新增post请求解析
+        m_method = POST;
     }else {
         return BAD_REQUEST;
     }
@@ -217,7 +219,9 @@ http_conn ::HTTP_CODE http_conn::parse_content(char * text) {
     if(m_read_idx >= (m_content_length+m_checked_idx)) {
         //完整读入了 做请求
         text[m_content_length] = '\0';
+        if(m_method == GET)
         return GET_REQUEST;
+        else if(m_method == POST ) return POST_REQUEST;//新增POST请求处理
     }
     return NO_REQUEST;
 }
