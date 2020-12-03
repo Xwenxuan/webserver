@@ -15,7 +15,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include "locker.h"
-
+#include "timer.h"
 class http_conn{
 public:
     /*文件名最大长度*/
@@ -34,13 +34,22 @@ public:
     /*行的读取状态*/
     enum LINE_STATUS {LINE_OK = 0,LINE_BAD,LINE_OPEN};
 
+    /*加一个定时器,用来判断该连接是否还活跃，不活跃就删掉*/
+    util_timer * timer;
 public:
     http_conn(){};
     ~http_conn(){};
 
 public:
+    /*获取连接*/
+    int get_sockfd(){
+        return m_sockfd;
+    }
+    int set_sockfd() {
+        m_sockfd = -1;
+    }
     /*初始化新接受的连接*/
-    void init(int sockfd,const sockaddr_in& addr);
+    void init(int sockfd,const sockaddr_in& addr,util_timer*);
     /*关闭连接*/
     void close_conn(bool read_close = true);
     /*处理客户请求*/

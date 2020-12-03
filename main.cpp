@@ -12,11 +12,40 @@
 #include "locker.h"
 #include "threadpool.h"
 #include "http_conn.h"
-
+#include "timer.h"
 #define MAX_FD 65535
 #define MAX_EVENT_NUMBER 10000
 #define PORT 12306
-#define IP "192.168.127.138"
+#define IP "192.168.127.158"
+#define TIMESLOT 20
+
+static sort_timer_lst timer_lst;//定时器
+static int pipefd[2];//用来传递信号的管道
+extern void removefd(int epollfd,int fd);
+// void removefd(int epollfd,int fd) {
+//     epoll_ctl(epollfd,EPOLL_CTL_DEL,fd,0);
+    
+// } 
+
+/*定时器回调函数*/
+void cb_func(http_conn * data) {
+    if(data -> get_sockfd() != -1) {
+        printf("close fd:&d\n",data -> get_sockfd());
+        removefd(data->m_epollfd,data -> get_sockfd());
+        assert(data);
+        data -> set_sockfd();
+        data -> m_user_count --;
+    }
+    
+
+}
+
+void timer_handler() {
+    //定时处理任务，实际上就是调用tick函数
+    timer_lst.tick();
+    //重新定时
+    alarm(TIMESLOT);
+}
 
 void addsig(int sig,void(handler)(int),bool restart = true) {
     struct sigaction sa;
@@ -70,9 +99,13 @@ int main() {
     assert(epollfd != -1);
     addfd(epollfd,listenfd,false);
     http_conn::m_epollfd = epollfd;
+
+    alarm(TIMESLOT);
+    //是否时间到
+    bool timeout = false;
     while(true) {
         int number = epoll_wait(epollfd,events,MAX_EVENT_NUMBER,-1);
-        printf("现在有%d个sockfd\n",number);
+        printf("有%d个sockfd的请求\n",number);
         if(number < 0 && errno != EINTR) {
             printf("epoll failure\n");
             break;
@@ -92,8 +125,18 @@ int main() {
                     show_error(connfd,"Internal server busy");
                     continue;
                 }
+
+                /*创建定时器*/
+                util_timer * timer = new util_timer;
+                timer ->user_data = &users[connfd];
+                time_t cur = time(NULL);
+                timer -> expire = cur + 3*TIMESLOT; //设置过期时间
+                timer -> cb_func = cb_func; //设置回调函数
                 /*初始化客户端连接*/
-                users[connfd].init(connfd,caddr);
+                users[connfd].init(connfd,caddr,timer);
+
+                //加到定时器链表中
+                timer_lst.add_timer(timer);
             }else if(events[i].events & (EPOLLRDHUP|EPOLLHUP|EPOLLERR)) {
                 //对端关闭了
                 printf("对端关闭\n");
@@ -102,21 +145,66 @@ int main() {
                 //读事件
                 printf("-------------接到了请求-------------------\n");
                 if(users[sockfd].read()) {
+                    //读到了数据 调整定时器 其实就是重新定时
+                    time_t cur = time(NULL);
+                    util_timer *timer = users[sockfd].timer;
+                    timer -> expire = cur + 3*TIMESLOT;
+                    printf("adjust timer once\n");
+                    timer_lst.adjust_timer(timer);
+
                     pool -> append(users+sockfd);
                 }else {
+                    //读数据有错 就移除定时器
+                    timer_lst.del_timer(users[sockfd].timer);
                     users[sockfd].close_conn();
                 }
             }else if(events[i].events & EPOLLOUT) {
                 printf("-------------要写入访问信息了-------------------\n");
                 if(!users[sockfd].write()) {
+                    //读数据有错 就移除定时器
+                    timer_lst.del_timer(users[sockfd].timer);
                     printf("-----------------------准备关闭连接---------------");
                     users[sockfd].close_conn();
                 }
+                //还活着 调整定时器 其实就是重新定时
+                time_t cur = time(NULL);
+                util_timer *timer = users[sockfd].timer;
+                timer -> expire = cur + 3*TIMESLOT;
+                printf("adjust timer once\n");
+                timer_lst.adjust_timer(timer);
+            }else if((sockfd == pipefd[1]) && (events[i].events & EPOLLOUT)) {
+                //接收到信号  这叫做统一事件源
+                int sig;
+                char signals[1024];
+                int ret = recv(pipefd[0],signals,sizeof(signals),0);
+                if(ret == -1) {
+                    continue;
+                }else if(ret == 0) {
+                    continue;
+                }else {
+                    for(int i = 0;i < ret; i++) {
+                        switch(signals[i]) {
+                            case SIGALRM:{
+                                timeout = true;
+                                break;
+                            }
+
+                        }
+                    }
+                }
+                
+
+            }
+            if(timeout) {
+                timer_handler();
+                timeout = false;
             }
         }
     }
     close(epollfd);
     close(listenfd);
+    close(pipefd[0]);
+    close(pipefd[1]);
     delete []users;
     delete pool;
     return 0;

@@ -52,13 +52,15 @@ void http_conn::close_conn(bool real_close) {
         m_user_count--;//关闭一个连接时，将客户总量--
     }
 }
-void http_conn::init(int sockfd,const sockaddr_in &addr) {
+void http_conn::init(int sockfd,const sockaddr_in &addr,util_timer * timer) {
     m_sockfd = sockfd;
     m_address = addr;
     int reuse = 1;
     setsockopt(m_sockfd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));//这一行设置不管TIME_WAIT状态
     addfd(m_epollfd,sockfd,true);
     m_user_count++;
+    //定时器
+    timer = timer;
     init();
 }
 

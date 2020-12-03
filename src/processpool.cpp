@@ -26,7 +26,7 @@ processpool<T> :: processpool(int listenfd,int process_num):m_listenfd(listenfd)
 }
 
 //统一事件源
-template <typenam T>
+template <typename T>
 void processpool<T>::setup_sig_pipe() {
     //创建epoll 事件监听表和信号管道
     m_epollfd = epoll_create(5);
@@ -53,7 +53,7 @@ void processpool<T> :: run() {
     run_parent();
 }
 
-template <typenam T>
+template <typename T>
 void processpool<T> :: run_child() {
     setup_sig_pipe();
 
