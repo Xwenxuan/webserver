@@ -16,8 +16,8 @@
 #define MAX_FD 65535
 #define MAX_EVENT_NUMBER 10000
 #define PORT 12306
-#define IP "192.168.127.158"
-#define TIMESLOT 30
+#define IP "127.0.0.1"
+#define TIMESLOT 5
 
 static sort_timer_lst timer_lst;//定时器
 static int pipefd[2];//用来传递信号的管道
@@ -47,6 +47,16 @@ void timer_handler() {
     alarm(TIMESLOT);
 }
 
+//传递信号 统一事件处理
+void sig_handler(int sig) {
+    int save_errno = errno;
+    int msg = sig;
+    printf("定时器触发了，发给主线程\n");
+    int ret = send(pipefd[1],(char*)&msg,1,0);
+    // printf("ret:%d\n",ret);
+    errno = save_errno;
+}
+
 void addsig(int sig,void(handler)(int),bool restart = true) {
     struct sigaction sa;
     memset(&sa,'\0',sizeof(sa));
@@ -63,6 +73,7 @@ void show_error(int connfd,const char * info) {
     send(connfd,info,strlen(info),0);
     close(connfd);
 }
+extern int setnonblocking(int fd);
 extern void addfd(int epollfd,int fd,bool);
 int main() {
     //忽略SIGPIPE信号
@@ -100,13 +111,19 @@ int main() {
     addfd(epollfd,listenfd,false);
     http_conn::m_epollfd = epollfd;
 
+    ret = socketpair(AF_UNIX,SOCK_STREAM,0,pipefd);
+    addsig(SIGALRM,sig_handler);
+    setnonblocking(pipefd[1]);
+    addfd(epollfd,pipefd[0],true);
+    assert(ret != -1);
+    
     alarm(TIMESLOT);
     //是否时间到
     bool timeout = false;
     while(true) {
         int number = epoll_wait(epollfd,events,MAX_EVENT_NUMBER,-1);
         printf("有%d个sockfd的请求\n",number);
-        if(number < 0 && errno != EINTR) {
+        if(number < 0 && errno != EINTR) { //epoll_wait被信号打断会返回-1 errno==EINTR
             printf("epoll failure\n");
             break;
         }
@@ -140,38 +157,7 @@ int main() {
                 //对端关闭了
                 printf("对端关闭\n");
                 users[sockfd].close_conn();
-            }else if(events[i].events & EPOLLIN) {
-                //读事件
-                printf("-------------接到了请求-------------------\n");
-                if(users[sockfd].read()) {
-                    //读到了数据 调整定时器 其实就是重新定时
-                    time_t cur = time(NULL);
-                    util_timer *timer = users[sockfd].timer;
-                    timer -> expire += cur + 3*TIMESLOT;
-                    printf("adjust timer once\n");
-                    timer_lst.adjust_timer(timer);
-
-                    pool -> append(users+sockfd);
-                }else {
-                    //读数据有错 就移除定时器
-                    timer_lst.del_timer(users[sockfd].timer);
-                    users[sockfd].close_conn();
-                }
-            }else if(events[i].events & EPOLLOUT) {
-                printf("-------------要写入访问信息了-------------------\n");
-                if(!users[sockfd].write()) {
-                    //读数据有错 就移除定时器
-                    timer_lst.del_timer(users[sockfd].timer);
-                    printf("-----------------------准备关闭连接---------------");
-                    users[sockfd].close_conn();
-                }
-                //还活着 调整定时器 其实就是重新定时
-                time_t cur = time(NULL);
-                util_timer *timer = users[sockfd].timer;
-                timer -> expire = cur + 3*TIMESLOT;
-                printf("adjust timer once\n");
-                timer_lst.adjust_timer(timer);
-            }else if((sockfd == pipefd[1]) && (events[i].events & EPOLLOUT)) {
+            }else if((sockfd == pipefd[0]) && (events[i].events & EPOLLIN)) {
                 //接收到信号  这叫做统一事件源
                 int sig;
                 char signals[1024];
@@ -193,12 +179,46 @@ int main() {
                     }
                 }
                 
+            }else if(events[i].events & EPOLLOUT) {
+                printf("-------------要写入访问信息了-------------------\n");
+                if(!users[sockfd].write()) {
+                    //读数据有错 就移除定时器
+                    timer_lst.del_timer(users[sockfd].timer);
+                    printf("-----------------------准备关闭连接---------------");
+                    users[sockfd].close_conn();
+                }
+                //还活着 调整定时器 其实就是重新定时
+                time_t cur = time(NULL);
+                util_timer *timer = users[sockfd].timer;
+                timer -> expire = cur + 3*TIMESLOT;
+                printf("adjust timer once\n");
+                timer_lst.adjust_timer(timer);
+            }else if(events[i].events & EPOLLIN) {
+                //读事件
+                printf("-------------接到了请求-------------------\n");
+                if(users[sockfd].read()) {
+                    //读到了数据 调整定时器 其实就是重新定时
+                    time_t cur = time(NULL);
+                    util_timer *timer = users[sockfd].timer;
+                    timer -> expire += cur + 3*TIMESLOT;
+                    printf("adjust timer once\n");
+                    timer_lst.adjust_timer(timer);
+
+                    pool -> append(users+sockfd);
+                }else {
+                    //读数据有错 就移除定时器
+                    timer_lst.del_timer(users[sockfd].timer);
+                    users[sockfd].close_conn();
+                }
+                
 
             }
-            if(timeout) {
-                timer_handler();
-                timeout = false;
-            }
+            
+        }
+        if(timeout) {
+            printf("触发timer_handler\n");
+            timer_handler();
+            timeout = false;
         }
     }
     close(epollfd);
