@@ -221,7 +221,12 @@ http_conn ::HTTP_CODE http_conn::parse_content(char * text) {
         text[m_content_length] = '\0';
         if(m_method == GET)
         return GET_REQUEST;
-        else if(m_method == POST ) return POST_REQUEST;//新增POST请求处理
+        else if(m_method == POST ) {
+            post_arg = string(text);
+            printf("post请求参数:%s\n",post_arg.c_str());
+            return POST_REQUEST;//新增POST请求处理
+
+        }
     }
     return NO_REQUEST;
 }
@@ -258,9 +263,12 @@ http_conn :: HTTP_CODE http_conn::process_read() {
             }
             case CHECK_STATE_CONTENT:
             {
+                // printf("看看这里经过了几次\n"); //这里就经过了一次啊
                 ret = parse_content(text);
                 if(ret == GET_REQUEST) {
                     return do_request();
+                }else if(ret == POST_REQUEST) {
+                    return do_post(m_url); //处理post请求
                 }
                 line_status = LINE_OPEN;
                 break;
@@ -274,9 +282,36 @@ http_conn :: HTTP_CODE http_conn::process_read() {
     return NO_REQUEST;
 }
 
-//处理post请求
-http_conn::HTTP_CODE http_conn::do_post() {
+//设置post参数
+void http_conn::set_arg(string arg) {
+    this -> post_arg = arg;
+}
 
+string http_conn::get_arg() {
+    return post_arg;
+}
+//注册post方法
+void http_conn::register_method(string url,string (*method)(string arg)) {
+    url_method[url] = method;
+}
+
+
+
+//处理post请求
+http_conn::HTTP_CODE http_conn::do_post(string url) {
+    //想办法把参数拿出来
+    string arg = get_arg();
+    if(url_method[url] != NULL) {
+        add_status_line(200,ok_200_title);
+        
+        //返回的是json数据
+        printf("执行到这里了----\n");
+        arg = url_method[url](arg);
+        add_headers(arg.size());
+        add_content(arg.c_str());
+        return POST_REQUEST;
+    } 
+    return BAD_REQUEST;
 }
 
 /*当得到一个完整、正确的http请求时，我们就分析目标文件的属性。如果目标文件存在、对所有用户可读，且不是目录，则使用mmap将其映射到内存地址m_file_address处，并告诉调用者获取文件成功*/
@@ -335,11 +370,13 @@ bool http_conn::write()
         }
         bytes_to_send -= tmp;
         bytes_have_send += tmp;
+        printf("bytes_to_send:%d--------bytes_have_send:%d\n",bytes_to_send,bytes_have_send);
         if(bytes_to_send <= bytes_have_send) {
-            printf("发送成功了\n");
+            // printf("发送成功了\n");
             /*发送http响应成功，根据http请求中的Connection字段决定是否立即关闭连接*/
             unmap();
-            if(m_linger) {
+            //http1.1默认支持长连接  所以不管有不有keep-alive都是长连接
+            if(m_linger || !m_linger) {
                 init();
                 modfd(m_epollfd,m_sockfd,EPOLLIN);
                 return true;
@@ -376,7 +413,13 @@ bool http_conn::add_content_type(const char * type) {
 bool http_conn::add_headers(int content_len) {
     add_content_length(content_len);
     // add_linger();
-    add_content_type("text/html");
+    if(m_method == GET) {
+        add_content_type("text/html");
+    }else {
+        //post 用json返回
+        add_content_type("application/json");
+    }
+    
     add_blank_line();
 }
 
@@ -453,6 +496,13 @@ bool http_conn::process_write(HTTP_CODE ret) {
                     return false;
                 }
             }
+        }
+        case POST_REQUEST:
+        {
+            printf("是post请求\n");
+            break;
+            // add_status_line(200,ok_200_title);
+            //处理post请求
         }
         default:
         {

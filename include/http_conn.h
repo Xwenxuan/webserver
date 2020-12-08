@@ -16,6 +16,11 @@
 #include <errno.h>
 #include "locker.h"
 #include "timer.h"
+#include <string>
+#include <map>
+using namespace std;
+
+typedef string (*method)(string);
 class http_conn{
 public:
     /*文件名最大长度*/
@@ -34,8 +39,10 @@ public:
     /*行的读取状态*/
     enum LINE_STATUS {LINE_OK = 0,LINE_BAD,LINE_OPEN};
 
-    /*加一个定时器,用来判断该连接是否还活跃，不活跃就删掉*/
+    /*加一个定时器,用来判断该连接是否还活跃，不活跃就删掉链接*/
     util_timer * timer;
+
+    
 public:
     http_conn(){};
     ~http_conn(){};
@@ -71,7 +78,7 @@ private:
     HTTP_CODE parse_headers(char * text);
     HTTP_CODE parse_content(char * text);
     HTTP_CODE do_request();
-    HTTP_CODE do_post(); //新增处理post请求
+    HTTP_CODE do_post(string url); //新增处理post请求
     char * get_line(){return m_read_buf+m_start_line;}
     LINE_STATUS parse_line();
 
@@ -85,6 +92,7 @@ private:
     bool add_linger();
     bool add_blank_line();
     bool add_content_type(const char * type);
+
 public:
     /*所有socket事件都注册到一个epollfd上*/
     static int m_epollfd;
@@ -133,6 +141,15 @@ private:
      struct iovec m_iv[2];
      int m_iv_count;
 
-
+    /*post请求参数*/
+    string post_arg;
+    //post请求对应的方法
+    map<string,method> url_method;
+public:
+    void set_arg(string arg);
+    string get_arg();
+    //注册方法
+    void register_method(string url,string (*method)(string arg));
+    
 };
 #endif
