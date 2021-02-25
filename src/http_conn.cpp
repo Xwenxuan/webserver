@@ -2,6 +2,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstdlib>
+#include<string>
+using namespace std;
 /*定义http响应的一些状态信息*/
 const char * ok_200_title = "OK";
 const char * error_400_title = "Bad Request";
@@ -32,7 +34,7 @@ void addfd(int epollfd,int fd,bool one_shot) {
 }
 void removefd(int epollfd,int fd) {
     epoll_ctl(epollfd,EPOLL_CTL_DEL,fd ,0);
-    close(fd);
+    shutdown(fd,SHUT_RDWR);
 }
 
 void modfd(int epollfd,int fd,int ev) {
@@ -376,7 +378,16 @@ bool http_conn::add_content_type(const char * type) {
 bool http_conn::add_headers(int content_len) {
     add_content_length(content_len);
     // add_linger();
-    add_content_type("text/html");
+    
+    string type(m_read_file);
+    if(type.find(".jpg") != type.npos) {
+        add_content_type("text/jpeg");
+    }else if(type.find(".mp4") != type.npos) {
+        add_content_type("audio/mp4");
+    }else {
+        add_content_type("text/html");
+    }
+    
     add_blank_line();
 }
 

@@ -16,8 +16,8 @@
 #define MAX_FD 65535
 #define MAX_EVENT_NUMBER 10000
 #define PORT 12306
-#define IP "127.0.0.1"
-#define TIMESLOT 5
+#define IP "192.168.1.100"
+#define TIMESLOT 10
 
 static sort_timer_lst timer_lst;//定时器
 static int pipefd[2];//用来传递信号的管道
@@ -53,7 +53,6 @@ void sig_handler(int sig) {
     int msg = sig;
     printf("定时器触发了，发给主线程\n");
     int ret = send(pipefd[1],(char*)&msg,1,0);
-    // printf("ret:%d\n",ret);
     errno = save_errno;
 }
 
@@ -108,7 +107,13 @@ int main() {
     epoll_event events[MAX_EVENT_NUMBER];
     int epollfd = epoll_create(100);
     assert(epollfd != -1);
-    addfd(epollfd,listenfd,false);
+    epoll_event ev;
+    ev.data.fd = listenfd;
+    ev.events = EPOLLIN|EPOLLRDHUP;
+    
+    epoll_ctl(epollfd,EPOLL_CTL_ADD,listenfd,&ev);
+    setnonblocking(listenfd);
+    // addfd(epollfd,listenfd,false);
     http_conn::m_epollfd = epollfd;
 
     ret = socketpair(AF_UNIX,SOCK_STREAM,0,pipefd);
@@ -117,7 +122,7 @@ int main() {
     addfd(epollfd,pipefd[0],true);
     assert(ret != -1);
     
-    alarm(TIMESLOT);
+    // alarm(TIMESLOT); 
     //是否时间到
     bool timeout = false;
     while(true) {
@@ -155,6 +160,7 @@ int main() {
                 timer_lst.add_timer(timer);
             }else if(events[i].events & (EPOLLRDHUP|EPOLLHUP|EPOLLERR)) {
                 //对端关闭了
+                printf("events %x\n",events[i].events);
                 printf("对端关闭\n");
                 users[sockfd].close_conn();
             }else if((sockfd == pipefd[0]) && (events[i].events & EPOLLIN)) {

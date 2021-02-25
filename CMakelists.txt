@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 2.7)
+
+project(WEBSERVER)
+
+include_directories(include)
+
+# add_compile_options(-pthread)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")  
+#debug 模式
+set(CMAKE_BUILD_TYPE Debug)
+
+add_executable(server main.cpp src/http_conn.cpp)
+
