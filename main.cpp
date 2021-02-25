@@ -17,6 +17,7 @@
 #define MAX_EVENT_NUMBER 10000
 #define PORT 12306
 #define IP "192.168.1.100"
+
 #define TIMESLOT 10
 
 static sort_timer_lst timer_lst;//定时器
@@ -27,10 +28,19 @@ extern void removefd(int epollfd,int fd);
     
 // } 
 
+string hello(string arg) {
+    //先解析arg
+    string name = arg.substr(sizeof("name"));
+    string res = "{name:\""+name+"\"}";
+    printf("返回的值为：%s\n",res.c_str());
+    return res;
+}
+
+
 /*定时器回调函数*/
 void cb_func(http_conn * data) {
     if(data -> get_sockfd() != -1) {
-        printf("close fd:&d\n",data -> get_sockfd());
+        printf("close fd:%d\n",data -> get_sockfd());
         removefd(data->m_epollfd,data -> get_sockfd());
         assert(data);
         data -> set_sockfd();
@@ -51,7 +61,7 @@ void timer_handler() {
 void sig_handler(int sig) {
     int save_errno = errno;
     int msg = sig;
-    printf("定时器触发了，发给主线程\n");
+    // printf("定时器触发了，发给主线程\n");
     int ret = send(pipefd[1],(char*)&msg,1,0);
     errno = save_errno;
 }
@@ -117,10 +127,12 @@ int main() {
     http_conn::m_epollfd = epollfd;
 
     ret = socketpair(AF_UNIX,SOCK_STREAM,0,pipefd);
+    assert(ret != -1);
     addsig(SIGALRM,sig_handler);
     setnonblocking(pipefd[1]);
-    addfd(epollfd,pipefd[0],true);
-    assert(ret != -1);
+    /*EPOLLONESHOT 大坑 EPOLLONESHOT表示处理完之后这个事件还需要重新注册才行*/
+    addfd(epollfd,pipefd[0],false);
+    
     
     // alarm(TIMESLOT); 
     //是否时间到
@@ -132,6 +144,7 @@ int main() {
             printf("epoll failure\n");
             break;
         }
+
         for(int i = 0;i < number;i++) {
             int sockfd = events[i].data.fd;
             if(sockfd == listenfd) {
@@ -156,6 +169,8 @@ int main() {
                 timer -> cb_func = cb_func; //设置回调函数
                 /*初始化客户端连接*/
                 users[connfd].init(connfd,caddr,timer);
+                //注册一下方法
+                users[connfd].register_method("/hello",hello);
                 //加到定时器链表中
                 timer_lst.add_timer(timer);
             }else if(events[i].events & (EPOLLRDHUP|EPOLLHUP|EPOLLERR)) {
@@ -176,7 +191,8 @@ int main() {
                     for(int i = 0;i < ret; i++) {
                         switch(signals[i]) {
                             case SIGALRM:{
-                                printf("接收到了定时器信号\n");
+                                // printf("接收到了定时器信号\n");
+                                // alarm(TIMESLOT);
                                 timeout = true;
                                 break;
                             }
